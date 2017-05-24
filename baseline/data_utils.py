@@ -4,13 +4,15 @@ EN_BLACKLIST = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~\''
 FILENAME = 'data/chat.txt'
 
 limit = {
-        'maxq' : 20,
+        'maxq' : 21,
         'minq' : 0,
-        'maxa' : 20,
+        'maxa' : 21,
         'mina' : 3
         }
 
 UNK = 'unk'
+EOS = 'EOS'
+GO  = 'GO'
 VOCAB_SIZE = 6000
 
 import random
@@ -68,7 +70,7 @@ def index_(tokenized_sentences, vocab_size):
     # get vocabulary of 'vocab_size' most used words
     vocab = freq_dist.most_common(vocab_size)
     # index2word
-    index2word = ['_'] + [UNK] + [ x[0] for x in vocab ]
+    index2word = ['_'] + [UNK] + [ x[0] for x in vocab ] + [GO] + [EOS]
     # word2index
     word2index = dict([(w,i) for i,w in enumerate(index2word)] )
     return index2word, word2index, freq_dist
@@ -85,8 +87,8 @@ def filter_data(sequences):
 
     for i in range(0, len(sequences), 2):
         qlen, alen = len(sequences[i].split(' ')), len(sequences[i+1].split(' '))
-        if qlen >= limit['minq'] and qlen <= limit['maxq']:
-            if alen >= limit['mina'] and alen <= limit['maxa']:
+        if qlen >= limit['minq'] and qlen < limit['maxq']:
+            if alen >= limit['mina'] and alen < limit['maxa']:
                 filtered_q.append(sequences[i])
                 filtered_a.append(sequences[i+1])
 
@@ -118,7 +120,7 @@ def zero_pad(qtokenized, atokenized, w2idx):
 
     for i in range(data_len):
         q_indices = pad_seq(qtokenized[i], w2idx, limit['maxq'])
-        a_indices = pad_seq(atokenized[i], w2idx, limit['maxa'])
+        a_indices = pad_seq(atokenized[i], w2idx, limit['maxa'], q = False)
 
         #print(len(idx_q[i]), len(q_indices))
         #print(len(idx_a[i]), len(a_indices))
@@ -134,13 +136,16 @@ def zero_pad(qtokenized, atokenized, w2idx):
     return [list of indices]
 
 '''
-def pad_seq(seq, lookup, maxlen):
+def pad_seq(seq, lookup, maxlen,  q = True):
     indices = []
     for word in seq:
         if word in lookup:
             indices.append(lookup[word])
         else:
             indices.append(lookup[UNK])
+    if not q:
+        return indices + [lookup[EOS]] + [0]*(maxlen - len(seq) - 1)
+    
     return indices + [0]*(maxlen - len(seq))
 
 
