@@ -32,7 +32,7 @@ w2i['GO'] = len(i2w)-1
 
 # In[282]:
 
-batch_size = 128
+batch_size = 256
 L = len(idx_q[0])
 vocab_size = len(i2w)
 hidden_size = 256
@@ -185,7 +185,7 @@ def train_epochs(epochs, encoder, decoder, eoptim, doptim, criterion, print_ever
     config.printsize = True
 
     for epoch in tqdm(range(epochs+1)):
-        loss = train(encoder, decoder, eoptim, doptim, criterion, idx_q[:30000], idx_a[:30000],
+        loss = train(encoder, decoder, eoptim, doptim, criterion, idx_q, idx_a,
                     print_every=print_every*100)    
         if epoch % print_every == 0:
             losses.append(loss)
@@ -194,10 +194,16 @@ def train_epochs(epochs, encoder, decoder, eoptim, doptim, criterion, print_ever
         
 def train(encoder, decoder, eoptim, doptim, criterion, question_ids, answer_ids, print_every=100):
     input_length = len(question_ids[0])
-    for batch_index in range(len(idx_q)):
-        l,r = batch_index * batch_size, (batch_index + 1) * batch_size
+    dataset_size = len(idx_q)
+    batch_count  = dataset_size//batch_size
+    for batch_index in range(batch_count):
+        #l,r = batch_index * batch_size, (batch_index + 1) * batch_size
+        import numpy as np
+        indices = np.arange(batch_size)
+        np.random.shuffle(indices)
+        indices = indices * batch_count
         
-        question_id, answer_id = question_ids[l:r], answer_ids[l:r]
+        question_id, answer_id = question_ids[indices], answer_ids[indices]
         _batch_size = len(question_id)
         if _batch_size != batch_size:
             print('breaking because batch sizes do not match')
@@ -255,8 +261,8 @@ def train_epochs_(epochs, encoder, decoder, eoptim, doptim, criterion, print_eve
     config.printsize = True
 
     for epoch in tqdm(range(epochs+1)):
-        loss = train(encoder, decoder, eoptim, doptim, criterion, idx_q[:30000], idx_a[:30000],
-                    print_every=print_every*100)    
+        loss = train(encoder, decoder, eoptim, doptim, criterion, idx_q, idx_a,
+                    print_every=print_every*1000)    
         if epoch % print_every == 0:
             losses.append(loss)
             print('{} - loss: {}'.format(epoch, loss))
