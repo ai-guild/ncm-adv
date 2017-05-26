@@ -63,7 +63,7 @@ def initial_state(batch_size, hidden_size):
 
 def psize(name, variable):
     if config.printsize:
-        print(name, variable.size(), type(variable.data))
+        print(name, variable.size(), '\t', type(variable.data))
         
 class Encoder(nn.Module):
     def __init__(self, vocab_size, hidden_size):
@@ -114,15 +114,20 @@ class Decoder(nn.Module):
         GO = torch.LongTensor([w2i['GO']] * batch_size).cuda()            
         GO = Variable(GO)
         psize('GO', GO)
-        GO_emb = self.embed(GO)
-        psize('GO_emd', GO_emb)
         
-        hidden, cell_state = self.decode(GO_emb, hidden)
-        predicted_outputs.append(hidden)
-        for i in range(length - 1):
-            dec_input = hidden
-            hidden, cell_state = self.decode(dec_input, (hidden, cell_state))
+        dec_input = GO
+        hidden, cell_state = hidden
+        for i in range(length):
+            #psize('\tdec_input', dec_input)
+            dec_input_emb = self.embed(dec_input)
+            #psize('\tdec_input_emb', dec_input_emb)
+
+            hidden, cell_state = self.decode(dec_input_emb, (hidden, cell_state))
             predicted_outputs.append(hidden)
+
+            topv, topi = self.project(F.log_softmax(hidden)).topk(1)
+            #psize('\ttopi', topi)
+            dec_input = topi.squeeze(1)
             
         predicted_outputs = torch.stack(predicted_outputs).squeeze(1)
         psize('predicted_outputs', predicted_outputs)
@@ -131,38 +136,6 @@ class Decoder(nn.Module):
         psize('predicted_outputs', predicted_outputs)
         predicted_outputs = predicted_outputs.view(length, batch_size, vocab_size)
         psize('predicted_outputs', predicted_outputs)
-
-        return predicted_outputs
-    
-    def predict(self, outputs, hidden, batch_size):
-        length = outputs.size()[0]
-        psize('hidden', hidden[0]), psize('hidden', hidden[1])
-        predicted_outputs = []
-    
-        dec_embeddings = self.embed(outputs).view(length,
-                                                 batch_size,
-                                                 hidden_size)           #LxBxH
-    
-        GO = torch.LongTensor([w2i['GO']] * batch_size).cuda()            
-        GO = Variable(GO)
-        psize('GO', GO)
-        GO_emb = self.embed(GO)
-        psize('GO_emd', GO_emb)
-        
-        hidden, cell_state = self.decode(GO_emb, hidden)
-        predicted_outputs.append(hidden)
-        for i in range(length - 1):
-            dec_input = hidden
-            hidden, cell_state = self.decode(dec_input, (hidden, cell_state))
-            predicted_outputs.append(hidden)
-            
-        predicted_outputs = torch.stack(predicted_outputs).squeeze(1)
-        psize('predicted_outputs', predicted_outputs)
-        
-        predicted_outputs = self.project(predicted_outputs.view(length*batch_size, 
-                                                                hidden_size))
-        psize('predicted_outputs', predicted_outputs)
-        predicted_outputs = predicted_outputs.view(length, batch_size, vocab_size)
 
         return predicted_outputs
     
@@ -271,7 +244,7 @@ def train_epochs_(epochs, encoder, decoder, eoptim, doptim, criterion, print_eve
         decoder_test.load_state_dict(torch.load('graph.pytorch.decoder.pth'))
 
         if epoch % validate_every == 0:
-            test_q, test_a = idx_q[0], idx_a[0]
+            test_q, test_a = idx_q[-1], idx_a[-1]
 
             encoder_test.eval()
             decoder_test.eval()
