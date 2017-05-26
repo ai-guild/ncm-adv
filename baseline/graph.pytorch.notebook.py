@@ -120,11 +120,7 @@ class Decoder(nn.Module):
         hidden, cell_state = self.decode(GO_emb, hidden)
         predicted_outputs.append(hidden)
         for i in range(length - 1):
-            import random
-            if random.random() > 0:
-                dec_input = dec_embeddings[i+1]
-            else:
-                dec_input = hidden
+            dec_input = hidden
             hidden, cell_state = self.decode(dec_input, (hidden, cell_state))
             predicted_outputs.append(hidden)
             
@@ -244,8 +240,8 @@ decoder.load_state_dict(torch.load('graph.pytorch.decoder.pth'))
 
 
 criterion = nn.NLLLoss()
-eoptim = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.1)
-doptim = optim.SGD(decoder.parameters(), lr=0.1, momentum=0.1)
+eoptim = optim.SGD(encoder.parameters(), lr=0.01, momentum=0.1)
+doptim = optim.SGD(decoder.parameters(), lr=0.01, momentum=0.1)
 
 
 encoder_test = Encoder(vocab_size, hidden_size)
@@ -261,6 +257,7 @@ def train_epochs_(epochs, encoder, decoder, eoptim, doptim, criterion, print_eve
     config.printsize = True
 
     for epoch in tqdm(range(epochs+1)):
+        print('--- epoch: {} ---'.format(epoch))
         loss = train(encoder, decoder, eoptim, doptim, criterion, idx_q, idx_a,
                     print_every=print_every*1000)    
         if epoch % print_every == 0:
@@ -288,9 +285,13 @@ def train_epochs_(epochs, encoder, decoder, eoptim, doptim, criterion, print_eve
             predictions = decoder_test.predict(test_a, encoder_test(test_q, hidden, _batch_size), _batch_size)
             predictions = predictions.squeeze(1)
             predictions = F.log_softmax(predictions).max(1)[1].squeeze(1)
-
+            
+            predictions_ = decoder_test(test_a, encoder_test(test_q, hidden, _batch_size), _batch_size)
+            predictions_ = predictions_.squeeze(1)
+            predictions_ = F.log_softmax(predictions_).max(1)[1].squeeze(1)
 
             print(arr2sent(predictions.cpu().data.numpy()))
+            print(arr2sent(predictions_.cpu().data.numpy()))
             print(arr2sent(test_a.cpu().data.numpy()))
 
 def arr2sent(arr):
