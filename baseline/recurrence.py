@@ -13,6 +13,11 @@ def gru_n(num_units, num_layers):
                     )
 
 
+def get_variables(n, shape, name='W'):
+    return (tf.get_variable(name+str(i), dtype=tf.float32, shape=shape)
+               for i in range(n))
+
+
 '''
     Uni-directional RNN
 
@@ -107,16 +112,16 @@ def bi_net(cell_f, cell_b, inputs, batch_size, timesteps,
     shape(ci)         : [B,d]
 
 '''
-def attention(enc_states, dec_state, params):
+def attention(enc_states, dec_state, params, d, timesteps):
     # based on "Neural Machine Translation by Jointly Learning to Align and Translate"
     #  https://arxiv.org/abs/1409.0473
     Wa, Ua = params['Wa'], params['Ua']
     # s_ij -> [B,L,d]
     a = tf.tanh(tf.expand_dims(tf.matmul(dec_state, Wa), axis=1) + 
-            tf.reshape(tf.matmul(tf.reshape(enc_states,[-1, d]), Ua), [-1, L, d]))
+            tf.reshape(tf.matmul(tf.reshape(enc_states,[-1, d]), Ua), [-1, timesteps, d]))
     Va = params['Va'] # [d, 1]
     # e_ij -> softmax(aV_a) : [B, L]
-    scores = tf.nn.softmax(tf.reshape(tf.matmul(tf.reshape(a, [-1, d]), Va), [-1, L]))
+    scores = tf.nn.softmax(tf.reshape(tf.matmul(tf.reshape(a, [-1, d]), Va), [-1, timesteps]))
     # c_i -> weighted sum of encoder states
     return tf.reduce_sum(enc_states*tf.expand_dims(scores, axis=-1), axis=1) # [B, d]    
 
@@ -134,7 +139,8 @@ def attention(enc_states, dec_state, params):
 
 
 '''
-def attentive_decoder(enc_states, init_state, batch_size, timesteps,
+def attentive_decoder(enc_states, init_state, batch_size, 
+                      d, timesteps,
                       inputs = [],
                       scope='attentive_decoder_0',
                       num_layers=1,
@@ -163,7 +169,7 @@ def attentive_decoder(enc_states, init_state, batch_size, timesteps,
     for i in range(timesteps):
         input_ = outputs[-1] if feed_previous else inputs[i]
         output, state = step(input_, states[-1],
-                            attention(enc_states, states[-1], att_params))
+                            attention(enc_states, states[-1], att_params, d, timesteps))
     
         outputs.append(output)
         states.append(state)
