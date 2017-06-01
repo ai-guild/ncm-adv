@@ -35,7 +35,7 @@ def uni_net(cell, inputs, init_state, timesteps, time_major=False, scope='uni_ne
         for i in range(timesteps):
             if i > 0:
                 tf.get_variable_scope().reuse_variables()
-            output, state = cell(inputs[i], states[-1])
+            output, state = cell(inputs_tm[i], states[-1])
             outputs.append(output)
             states.append(state)
 
@@ -58,7 +58,7 @@ def uni_net(cell, inputs, init_state, timesteps, time_major=False, scope='uni_ne
 def bi_net(cell_f, cell_b, inputs, batch_size, timesteps, 
            scope= 'bi_net',
            project_outputs=False,
-           num_layers=False):
+           num_layers=1):
 
     # forward
     _, states_f = uni_net(cell_f, 
@@ -80,7 +80,7 @@ def bi_net(cell_f, cell_b, inputs, batch_size, timesteps,
         
         if len(states.shape) == 4 and num_layers:
             states = tf.reshape(tf.transpose(states, [-2, 0, 1, -1]), [-1, hdim*2*num_layers])
-            Wo = tf.get_variable(scope+'/Wo', dtype=tf.float32, shape=[3*2*hdim, hdim])
+            Wo = tf.get_variable(scope+'/Wo', dtype=tf.float32, shape=[num_layers*2*hdim, hdim])
         elif len(states.shape) == 3:
             states = tf.reshape(tf.transpose(states, [-2, 0, -1]), [-1, hdim*2])
             Wo = tf.get_variable(scope+'/Wo', dtype=tf.float32, shape=[2*hdim, hdim])
@@ -91,3 +91,31 @@ def bi_net(cell_f, cell_b, inputs, batch_size, timesteps,
         outputs = tf.reshape(tf.matmul(states, Wo), [batch_size, timesteps, hdim])
 
     return (states_f, states_b), outputs
+
+
+'''
+    Attention Mechanism
+
+    [usage]
+    ci = attention(enc_states, dec_state, params= {
+        'Wa' : Wa, # [d,d]
+        'Ua' : Ua, # [d,d]
+        'Va' : Va  # [d,1]
+        })
+    shape(enc_states) : [B, L, d]
+    shape(dec_state)  : [B, d]
+    shape(ci)         : [B,d]
+
+'''
+def attention(enc_states, dec_state, params):
+    # based on "Neural Machine Translation by Jointly Learning to Align and Translate"
+    #  https://arxiv.org/abs/1409.0473
+    Wa, Ua = params['Wa'], params['Ua']
+    # s_ij -> [B,L,d]
+    a = tf.tanh(tf.expand_dims(tf.matmul(dec_state, Wa), axis=1) + 
+            tf.reshape(tf.matmul(tf.reshape(enc_states,[-1, d]), Ua), [-1, L, d]))
+    Va = params['Va'] # [d, 1]
+    # e_ij -> softmax(aV_a) : [B, L]
+    scores = tf.nn.softmax(tf.reshape(tf.matmul(tf.reshape(a, [-1, d]), Va), [-1, L]))
+    # c_i -> weighted sum of encoder states
+    return tf.reduce_sum(enc_states*tf.expand_dims(scores, axis=-1), axis=1) # [B, d]    
