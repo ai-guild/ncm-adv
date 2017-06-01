@@ -119,3 +119,53 @@ def attention(enc_states, dec_state, params):
     scores = tf.nn.softmax(tf.reshape(tf.matmul(tf.reshape(a, [-1, d]), Va), [-1, L]))
     # c_i -> weighted sum of encoder states
     return tf.reduce_sum(enc_states*tf.expand_dims(scores, axis=-1), axis=1) # [B, d]    
+
+
+'''
+    Attentive Decoder
+
+    [usage]
+    dec_outputs, dec_states = attentive_decoder(sbi_p,
+                                            tf.zeros(dtype=tf.float32, shape=[B,d]),
+                                            batch_size=B,timesteps=L,feed_previous=True,
+                                            inputs = inputs)
+
+
+'''
+def attentive_decoder(enc_states, init_state, batch_size, timesteps,
+                      inputs = [],
+                      scope='attentive_decoder_0',
+                      num_layers=1,
+                      feed_previous=False):
+    # get parameters
+    U,W,C,Ur,Wr,Cr,Uz,Wz,Cz,Uo,Vo,Co = get_variables(12, [d,d], name='decoder_param')
+    Wa, Ua = get_variables(2, [d,d], 'att')
+    Va = tf.get_variable('Va', shape=[d, 1], dtype=tf.float32)
+    att_params = {
+        'Wa' : Wa, 'Ua' : Ua, 'Va' : Va
+    }
+    
+        
+    def step(input_, state, ci):
+        z = tf.nn.sigmoid(tf.matmul(input_, Wz)+tf.matmul(state, Uz)+tf.matmul(ci, Cz))
+        r = tf.nn.sigmoid(tf.matmul(input_, Wr)+tf.matmul(state, Ur)+tf.matmul(ci, Cr))
+        si = tf.nn.tanh(tf.matmul(input_, W)+tf.matmul(ci, C)+tf.matmul(r*state, U))
+        
+        state = (1-z)*state + z*si
+        output = tf.matmul(state, Uo) + tf.matmul(input_, Vo) + tf.matmul(ci, Co)
+        
+        return output, state
+    
+    outputs = [inputs[0]] # include GO token as init input
+    states = [init_state]
+    for i in range(timesteps):
+        input_ = outputs[-1] if feed_previous else inputs[i]
+        output, state = step(input_, states[-1],
+                            attention(enc_states, states[-1], att_params))
+    
+        outputs.append(output)
+        states.append(state)
+    # time major -> batch major
+    states_bm = tf.transpose(tf.stack(states[1:]), [1, 0, 2])
+    outputs_bm = tf.transpose(tf.stack(outputs[1:]), [1, 0, 2])
+    return outputs_bm, states_bm
