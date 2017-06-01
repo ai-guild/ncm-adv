@@ -125,10 +125,12 @@ def attention(enc_states, dec_state, params):
     Attentive Decoder
 
     [usage]
-    dec_outputs, dec_states = attentive_decoder(sbi_p,
-                                            tf.zeros(dtype=tf.float32, shape=[B,d]),
-                                            batch_size=B,timesteps=L,feed_previous=True,
-                                            inputs = inputs)
+    dec_outputs, dec_states = attentive_decoder(enc_states,
+                                    tf.zeros(dtype=tf.float32, shape=[B,d]),
+                                    batch_size=B,timesteps=L,feed_previous=True,
+                                    inputs = inputs)
+    shape(enc_states) : [B, L, d]
+    shape(inputs) : [[B, d]] if feed_previous else [L, B, d]
 
 
 '''
