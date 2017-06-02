@@ -177,3 +177,74 @@ def attentive_decoder(enc_states, init_state, batch_size,
     states_bm = tf.transpose(tf.stack(states[1:]), [1, 0, 2])
     outputs_bm = tf.transpose(tf.stack(outputs[1:]), [1, 0, 2])
     return outputs_bm, states_bm
+
+
+'''
+    Gated Attention Network
+
+    based on "R-NET: Machine Reading Comprehension with Self-matching Networks"
+        https://www.microsoft.com/en-us/research/publication/mrc/
+
+    [usage]
+    dec_outputs, dec_states = gated_attention_net(enc_states, # encoded representation of text
+                                    tf.zeros(dtype=tf.float32, shape=[B,d*2]), # notice d*2
+                                    batch_size=B,timesteps=L,feed_previous=False,
+                                    inputs = inputs)
+    shape(enc_states) : [B, L, d]
+    shape(inputs) : [[B, d]] if feed_previous else [L, B, d]
+
+    For reading comprehension, inputs is same as enc_states; feed_previous doesn't apply
+
+
+'''
+def gated_attention_net(enc_states, init_state, batch_size, 
+                      d, timesteps,
+                      inputs = [],
+                      scope='gated_attention_net_0',
+                      feed_previous=False):
+    
+    # define attention parameters
+    Wa = tf.get_variable('Wa', shape=[d*2, d], dtype=tf.float32)
+    Ua = tf.get_variable('Ua', shape=[d, d], dtype=tf.float32)
+    Va = tf.get_variable('Va', shape=[d, 1], dtype=tf.float32)
+    att_params = {
+        'Wa' : Wa, 'Ua' : Ua, 'Va' : Va
+    }
+    
+    # define rnn cell
+    cell = gru(num_units=d*2)
+    
+    # gate params
+    Wg = tf.get_variable('Wg', shape=[d*2, d*2], dtype=tf.float32)
+        
+    def step(input_, state):
+        # define input gate
+        gi = tf.nn.sigmoid(tf.matmul(input_, Wg))
+        # apply gate to input
+        input_ = gi * input_
+        # recurrent step
+        output, state = cell(input_, state)
+        return output, state
+    
+    outputs = [inputs[0]] # include GO token as init input
+    states = [init_state]
+    for i in range(timesteps):
+        if i>0:
+            tf.get_variable_scope().reuse_variables()
+
+        input_ = outputs[-1] if feed_previous else inputs[i]
+
+        # get match for current word
+        ci = attention(enc_states, states[-1], att_params, d, timesteps)
+        # combine ci and input(i) 
+        input_ = tf.concat([input_, ci], axis=-1)
+        output, state = step(input_, states[-1])
+    
+        outputs.append(output)
+        states.append(state)
+
+    # time major -> batch major
+    states_bm = tf.transpose(tf.stack(states[1:]), [1, 0, 2])
+    outputs_bm = tf.transpose(tf.stack(outputs[1:]), [1, 0, 2])
+
+    return outputs_bm, states_bm
