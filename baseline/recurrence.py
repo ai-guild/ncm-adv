@@ -153,10 +153,11 @@ def attentive_decoder(enc_states, batch_size,
                       d, timesteps,
                       inputs = [],
                       scope='attentive_decoder_0',
+                      reuse = False,
                       num_layers=1,
                       feed_previous=False):
 
-    with tf.variable_scope('decoder', reuse=False):
+    with tf.variable_scope('decoder', reuse=reuse):
         # get parameters
         U,W,C,Ur,Wr,Cr,Uz,Wz,Cz,Uo,Vo,Co = get_variables(12, [d,d], name='decoder_param')
         Wa, Ua = get_variables(2, [d,d], 'att')
@@ -180,16 +181,20 @@ def attentive_decoder(enc_states, batch_size,
     states = [ tf.zeros(dtype=tf.float32, shape=[batch_size,d]) ]
 
     # inputs : to time_major
-    inputs = tf.transpose(inputs, [1,0,-1])
+    #inputs = tf.transpose(inputs, [1,0,-1]) # [L, B, d]
 
     for i in range(timesteps):
         input_ = outputs[-1] if feed_previous else inputs[i]
-        output, state = step(input_, states[-1],
-                            attention(enc_states, states[-1], att_params, d, timesteps))
+        ci = attention(enc_states, states[-1], att_params, d, timesteps)
+
+        #print(i, inputs, input_, states[-1], ci)
+
+        output, state = step(input_, states[-1], ci)
     
         outputs.append(output)
         states.append(state)
 
+    
     # time major -> batch major
     states_bm = tf.transpose(tf.stack(states[1:]), [1, 0, 2])
     outputs_bm = tf.transpose(tf.stack(outputs[1:]), [1, 0, 2])
