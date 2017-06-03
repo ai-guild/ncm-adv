@@ -35,6 +35,9 @@ def uni_net(cell, inputs, init_state, timesteps, time_major=False, scope='uni_ne
     # collection of states and outputs
     states, outputs = [init_state], []
 
+    d = cell.state_size[0]
+    num_layers = len(cell.state_size)
+
     with tf.variable_scope(scope):
 
         for i in range(timesteps):
@@ -44,7 +47,11 @@ def uni_net(cell, inputs, init_state, timesteps, time_major=False, scope='uni_ne
             outputs.append(output)
             states.append(state)
 
-    return tf.stack(outputs), tf.stack(states[1:])
+    states = tf.reshape(tf.transpose(tf.stack(states[1:]), [2, 0, 1, 3]), [-1, d*num_layers])
+    Ws = tf.get_variable('Ws', dtype=tf.float32, shape=[num_layers*d, d])
+    states = tf.reshape(tf.matmul(states, Ws), [-1, timesteps, d])
+
+    return tf.stack(outputs), states
 
 
 '''
@@ -65,30 +72,31 @@ def bi_net(cell_f, cell_b, inputs, batch_size, timesteps,
            project_outputs=False,
            num_layers=1):
 
-    # forward
-    _, states_f = uni_net(cell_f, 
-                          inputs,
-                          cell_f.zero_state(batch_size, tf.float32),
-                          timesteps,
-                          scope=scope + '_f')
-    # backward
-    _, states_b = uni_net(cell_b, 
-                          tf.reverse(inputs, axis=[1]),
-                          cell_b.zero_state(batch_size, tf.float32),
-                          timesteps,
-                          scope=scope + '_b')
+    with tf.variable_scope('fwd'):
+        # forward
+        _, states_f = uni_net(cell_f, 
+                              inputs,
+                              cell_f.zero_state(batch_size, tf.float32),
+                              timesteps)
+    with tf.variable_scope('bwd'):
+        # backward
+        _, states_b = uni_net(cell_b, 
+                              tf.reverse(inputs, axis=[1]),
+                              cell_b.zero_state(batch_size, tf.float32),
+                              timesteps)
     
     outputs = None
     # outputs
+    #  TODO : fix dimensions
     if project_outputs:
         states = tf.concat([states_f, states_b], axis=-1)
         
         if len(states.shape) == 4 and num_layers:
             states = tf.reshape(tf.transpose(states, [-2, 0, 1, -1]), [-1, hdim*2*num_layers])
-            Wo = tf.get_variable(scope+'/Wo', dtype=tf.float32, shape=[num_layers*2*hdim, hdim])
+            Wo = tf.get_variable('/Wo', dtype=tf.float32, shape=[num_layers*2*hdim, hdim])
         elif len(states.shape) == 3:
             states = tf.reshape(tf.transpose(states, [-2, 0, -1]), [-1, hdim*2])
-            Wo = tf.get_variable(scope+'/Wo', dtype=tf.float32, shape=[2*hdim, hdim])
+            Wo = tf.get_variable('/Wo', dtype=tf.float32, shape=[2*hdim, hdim])
         else:
             print('>> ERR : Unable to handle state reshape')
             return None
@@ -116,6 +124,7 @@ def bi_net(cell_f, cell_b, inputs, batch_size, timesteps,
 
 '''
 def attention(enc_states, dec_state, params, d, timesteps):
+
     Wa, Ua = params['Wa'], params['Ua']
     # s_ij -> [B,L,d]
     a = tf.tanh(tf.expand_dims(tf.matmul(dec_state, Wa), axis=1) + 
@@ -140,20 +149,22 @@ def attention(enc_states, dec_state, params, d, timesteps):
 
 
 '''
-def attentive_decoder(enc_states, init_state, batch_size, 
+def attentive_decoder(enc_states, batch_size, 
                       d, timesteps,
                       inputs = [],
                       scope='attentive_decoder_0',
                       num_layers=1,
                       feed_previous=False):
-    # get parameters
-    U,W,C,Ur,Wr,Cr,Uz,Wz,Cz,Uo,Vo,Co = get_variables(12, [d,d], name='decoder_param')
-    Wa, Ua = get_variables(2, [d,d], 'att')
-    Va = tf.get_variable('Va', shape=[d, 1], dtype=tf.float32)
-    att_params = {
-        'Wa' : Wa, 'Ua' : Ua, 'Va' : Va
-    }
-    
+
+    with tf.variable_scope('decoder', reuse=False):
+        # get parameters
+        U,W,C,Ur,Wr,Cr,Uz,Wz,Cz,Uo,Vo,Co = get_variables(12, [d,d], name='decoder_param')
+        Wa, Ua = get_variables(2, [d,d], 'att')
+        Va = tf.get_variable('Va', shape=[d, 1], dtype=tf.float32)
+        att_params = {
+            'Wa' : Wa, 'Ua' : Ua, 'Va' : Va
+        }
+        
         
     def step(input_, state, ci):
         z = tf.nn.sigmoid(tf.matmul(input_, Wz)+tf.matmul(state, Uz)+tf.matmul(ci, Cz))
@@ -166,7 +177,11 @@ def attentive_decoder(enc_states, init_state, batch_size,
         return output, state
     
     outputs = [inputs[0]] # include GO token as init input
-    states = [init_state]
+    states = [ tf.zeros(dtype=tf.float32, shape=[batch_size,d]) ]
+
+    # inputs : to time_major
+    inputs = tf.transpose(inputs, [1,0,-1])
+
     for i in range(timesteps):
         input_ = outputs[-1] if feed_previous else inputs[i]
         output, state = step(input_, states[-1],
@@ -174,109 +189,9 @@ def attentive_decoder(enc_states, init_state, batch_size,
     
         outputs.append(output)
         states.append(state)
-    # time major -> batch major
-    states_bm = tf.transpose(tf.stack(states[1:]), [1, 0, 2])
-    outputs_bm = tf.transpose(tf.stack(outputs[1:]), [1, 0, 2])
-    return outputs_bm, states_bm
-
-
-'''
-    Gated Attention Network
-
-    based on "R-NET: Machine Reading Comprehension with Self-matching Networks"
-        https://www.microsoft.com/en-us/research/publication/mrc/
-
-    [usage]
-    dec_outputs, dec_states = gated_attention_net(enc_states, # encoded representation of text
-                                    tf.zeros(dtype=tf.float32, shape=[B,d*2]), # notice d*2
-                                    batch_size=B,timesteps=L,feed_previous=False,
-                                    inputs = inputs)
-    shape(enc_states) : [B, L, d]
-    shape(inputs) : [[B, d]] if feed_previous else [L, B, d]
-
-    For reading comprehension, inputs is same as enc_states; feed_previous doesn't apply
-
-
-'''
-def gated_attention_net(enc_states, init_state, batch_size, 
-                      d, timesteps,
-                      inputs = [],
-                      scope='gated_attention_net_0',
-                      feed_previous=False):
-    
-    # define attention parameters
-    Wa = tf.get_variable('Wa', shape=[d*2, d], dtype=tf.float32)
-    Ua = tf.get_variable('Ua', shape=[d, d], dtype=tf.float32)
-    Va = tf.get_variable('Va', shape=[d, 1], dtype=tf.float32)
-    att_params = {
-        'Wa' : Wa, 'Ua' : Ua, 'Va' : Va
-    }
-    
-    # define rnn cell
-    cell = gru(num_units=d*2)
-    
-    # gate params
-    Wg = tf.get_variable('Wg', shape=[d*2, d*2], dtype=tf.float32)
-        
-    def step(input_, state):
-        # define input gate
-        gi = tf.nn.sigmoid(tf.matmul(input_, Wg))
-        # apply gate to input
-        input_ = gi * input_
-        # recurrent step
-        output, state = cell(input_, state)
-        return output, state
-    
-    outputs = [inputs[0]] # include GO token as init input
-    states = [init_state]
-    for i in range(timesteps):
-        if i>0:
-            tf.get_variable_scope().reuse_variables()
-
-        input_ = outputs[-1] if feed_previous else inputs[i]
-
-        # get match for current word
-        ci = attention(enc_states, states[-1], att_params, d, timesteps)
-        # combine ci and input(i) 
-        input_ = tf.concat([input_, ci], axis=-1)
-        output, state = step(input_, states[-1])
-    
-        outputs.append(output)
-        states.append(state)
 
     # time major -> batch major
     states_bm = tf.transpose(tf.stack(states[1:]), [1, 0, 2])
     outputs_bm = tf.transpose(tf.stack(outputs[1:]), [1, 0, 2])
 
     return outputs_bm, states_bm
-
-'''
-    Attention Pooling Mechanism
-
-    based on "R-NET: Machine Reading Comprehension with Self-matching Networks"
-        https://www.microsoft.com/en-us/research/publication/mrc/
-
-    [usage]
-    ci = attention(enc_states, dec_state, params= {
-        'Wa' : Wa, # [d,d]
-        'Wb' : Wb, # [d,d]
-        'Wc' : Wc, # [d,d]
-        'Va' : Va  # [d,1]
-        })
-    shape(states_a) : [B, L, d]
-    shape(states_b_i) : [B, d]
-    shape(state_c)    : [B, d]
-    shape(ci)         : [B, d]
-
-'''
-def attention_pooling(states_a, states_b_i, state_c, params, d, timesteps):
-    Wa, Wb, Wc = params['Wa'], params['Wb'], params['Wc']
-    # s_ij -> [B,L,d]
-    a = tf.tanh(tf.expand_dims(tf.matmul(states_b_i, Wb), axis=1) +
-            tf.reshape(tf.matmul(tf.reshape(states_a,[-1, d]), Wa), [-1, timesteps, d]) +
-            tf.expand_dims(tf.matmul(state_c, Wc)))
-    Va = params['Va'] # [d, 1]
-    # e_ij -> softmax(aV_a) : [B, L]
-    scores = tf.nn.softmax(tf.reshape(tf.matmul(tf.reshape(a, [-1, d]), Va), [-1, timesteps]))
-    # c_i -> weighted sum of encoder states
-    return tf.reduce_sum(enc_states*tf.expand_dims(scores, axis=-1), axis=1) # [B, d]    
