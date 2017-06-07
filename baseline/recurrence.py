@@ -31,7 +31,7 @@ def get_variables(n, shape, name='W'):
 def uni_net(cell, inputs, init_state, timesteps, time_major=False, scope='uni_net_0'):
     # convert to time major format
     if not time_major:
-        inputs_tm = tf.transpose(inputs, [1, 0, -1])
+        inputs_tm = tf.transpose(inputs, [1, 0, 2])
     # collection of states and outputs
     states, outputs = [init_state], []
 
@@ -95,7 +95,7 @@ def bi_net(cell_f, cell_b, inputs, batch_size, timesteps,
             states = tf.reshape(tf.transpose(states, [-2, 0, 1, -1]), [-1, hdim*2*num_layers])
             Wo = tf.get_variable('/Wo', dtype=tf.float32, shape=[num_layers*2*hdim, hdim])
         elif len(states.shape) == 3:
-            states = tf.reshape(tf.transpose(states, [-2, 0, -1]), [-1, hdim*2])
+            states = tf.reshape(tf.transpose(states, [1, 0, 2]), [-1, hdim*2])
             Wo = tf.get_variable('/Wo', dtype=tf.float32, shape=[2*hdim, hdim])
         else:
             print('>> ERR : Unable to handle state reshape')
